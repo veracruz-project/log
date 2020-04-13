@@ -1,3 +1,6 @@
+#[cfg(feature = "mesalock_sgx")]
+use std::prelude::v1::*;
+
 use std::fmt;
 
 /// An error encountered while working with structured data.
@@ -54,7 +57,7 @@ mod std_support {
     use super::*;
     use std::{error, io};
 
-    pub(super) type BoxedError = Box<error::Error + Send + Sync>;
+    pub(super) type BoxedError = Box<dyn error::Error + Send + Sync>;
 
     impl Error {
         /// Create an error from a standard error type.

@@ -1,5 +1,8 @@
 //! Structured keys.
 
+#[cfg(feature = "mesalock_sgx")]
+use std::prelude::v1::*;
+
 use std::fmt;
 use std::cmp;
 use std::hash;

@@ -271,13 +271,24 @@
 )]
 #![warn(missing_docs)]
 #![deny(missing_debug_implementations)]
-#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+#![cfg_attr(any(not(feature = "std"),
+                all(feature = "mesalock_sgx", not(target_env = "sgx"))),
+            no_std)]
 // When compiled for the rustc compiler itself we want to make sure that this is
 // an unstable crate
 #![cfg_attr(rustbuild, feature(staged_api, rustc_private))]
 #![cfg_attr(rustbuild, unstable(feature = "rustc_private", issue = "27812"))]
 
-#[cfg(all(not(feature = "std"), not(test)))]
+#![cfg_attr(all(target_env = "sgx", target_vendor = "mesalock"), feature(rustc_private))]
+
+#[cfg(all(feature = "std", feature = "mesalock_sgx", not(target_env = "sgx")))]
+#[macro_use]
+extern crate sgx_tstd as std;
+
+#[cfg(all(feature = "std", feature = "mesalock_sgx", not(target_env = "sgx")))]
+use std::prelude::v1::*;
+
+#[cfg(not(feature = "std"))]
 extern crate core as std;
 
 #[macro_use]
@@ -306,7 +317,7 @@ pub mod kv;
 
 // The LOGGER static holds a pointer to the global logger. It is protected by
 // the STATE static which determines whether LOGGER has been initialized yet.
-static mut LOGGER: &'static Log = &NopLogger;
+static mut LOGGER: &'static dyn Log = &NopLogger;
 
 #[allow(deprecated)]
 static STATE: AtomicUsize = ATOMIC_USIZE_INIT;
@@ -747,7 +758,7 @@ pub struct Record<'a> {
 // the underlying `Source`.
 #[cfg(feature = "kv_unstable")]
 #[derive(Clone)]
-struct KeyValues<'a>(&'a kv::Source);
+struct KeyValues<'a>(&'a dyn kv::Source);
 
 #[cfg(feature = "kv_unstable")]
 impl<'a> fmt::Debug for KeyValues<'a> {
@@ -828,7 +839,7 @@ impl<'a> Record<'a> {
     /// The structued key-value pairs associated with the message.
     #[cfg(feature = "kv_unstable")]
     #[inline]
-    pub fn key_values(&self) -> &kv::Source {
+    pub fn key_values(&self) -> &dyn kv::Source {
         self.key_values.0
     }
 
@@ -1002,7 +1013,7 @@ impl<'a> RecordBuilder<'a> {
     /// Set [`key_values`](struct.Record.html#method.key_values)
     #[cfg(feature = "kv_unstable")]
     #[inline]
-    pub fn key_values(&mut self, kvs: &'a kv::Source) -> &mut RecordBuilder<'a> {
+    pub fn key_values(&mut self, kvs: &'a dyn kv::Source) -> &mut RecordBuilder<'a> {
         self.record.key_values = KeyValues(kvs);
         self
     }
@@ -1210,7 +1221,7 @@ pub fn max_level() -> LevelFilter {
 ///
 /// [`set_logger`]: fn.set_logger.html
 #[cfg(all(feature = "std", atomic_cas))]
-pub fn set_boxed_logger(logger: Box<Log>) -> Result<(), SetLoggerError> {
+pub fn set_boxed_logger(logger: Box<dyn Log>) -> Result<(), SetLoggerError> {
     set_logger_inner(|| unsafe { &*Box::into_raw(logger) })
 }
 
@@ -1268,14 +1279,14 @@ pub fn set_boxed_logger(logger: Box<Log>) -> Result<(), SetLoggerError> {
 ///
 /// [`set_logger_racy`]: fn.set_logger_racy.html
 #[cfg(atomic_cas)]
-pub fn set_logger(logger: &'static Log) -> Result<(), SetLoggerError> {
+pub fn set_logger(logger: &'static dyn Log) -> Result<(), SetLoggerError> {
     set_logger_inner(|| logger)
 }
 
 #[cfg(atomic_cas)]
 fn set_logger_inner<F>(make_logger: F) -> Result<(), SetLoggerError>
 where
-    F: FnOnce() -> &'static Log,
+    F: FnOnce() -> &'static dyn Log,
 {
     unsafe {
         match STATE.compare_and_swap(UNINITIALIZED, INITIALIZING, Ordering::SeqCst) {
@@ -1312,7 +1323,7 @@ where
 /// (including all logging macros).
 ///
 /// [`set_logger`]: fn.set_logger.html
-pub unsafe fn set_logger_racy(logger: &'static Log) -> Result<(), SetLoggerError> {
+pub unsafe fn set_logger_racy(logger: &'static dyn Log) -> Result<(), SetLoggerError> {
     match STATE.load(Ordering::SeqCst) {
         UNINITIALIZED => {
             LOGGER = logger;
@@ -1331,7 +1342,7 @@ pub unsafe fn set_logger_racy(logger: &'static Log) -> Result<(), SetLoggerError
 ///
 /// [`set_logger`]: fn.set_logger.html
 #[allow(missing_copy_implementations)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SetLoggerError(());
 
 impl fmt::Display for SetLoggerError {
@@ -1352,7 +1363,7 @@ impl error::Error for SetLoggerError {
 ///
 /// [`from_str`]: https://doc.rust-lang.org/std/str/trait.FromStr.html#tymethod.from_str
 #[allow(missing_copy_implementations)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct ParseLevelError(());
 
 impl fmt::Display for ParseLevelError {
@@ -1372,7 +1383,7 @@ impl error::Error for ParseLevelError {
 /// Returns a reference to the logger.
 ///
 /// If a logger has not been set, a no-op implementation is returned.
-pub fn logger() -> &'static Log {
+pub fn logger() -> &'static dyn Log {
     unsafe {
         if STATE.load(Ordering::SeqCst) != INITIALIZED {
             static NOP: NopLogger = NopLogger;
